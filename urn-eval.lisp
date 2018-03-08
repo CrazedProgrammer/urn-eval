@@ -45,7 +45,7 @@
 
   path)
 
-(defun eval-function (code lib-dir)
+(defun eval-string (code lib-dir)
   (with (tmp-path (os/tmpname))
     (io/write-all! (.. tmp-path ".lisp") code)
     (let* [(spec (arg/create "The compiler and REPL for the Urn programming language."))
@@ -79,111 +79,32 @@
                     ;; Then using the fully optimised result
                     simple/emit-lua
                     ))]
-      (arg/add-help! spec)
-
-      (arg/add-category! spec "out" "Output"
-        "Customise what is emitted, as well as where and how it is generated.")
-
-      (arg/add-category! spec "path" "Input paths"
-        "Locations used to configure where libraries are loaded from.")
-
-      (arg/add-argument! spec '("--explain" "-e")
-        :help    "Explain error messages in more detail.")
-
-      (arg/add-argument! spec '("--time" "-t")
-        :help    "Time how long each task takes to execute. Multiple usages will show more detailed timings."
-        :many    true
-        :default 0
-        :action  (lambda (arg data) (.<! data (.> arg :name) (succ (or (.> data (.> arg :name)) 0)))))
-
-      (arg/add-argument! spec '("--verbose" "-v")
-        :help    "Make the output more verbose. Can be used multiple times"
-        :many    true
-        :default 0
-        :action  (lambda (arg data) (.<! data (.> arg :name) (succ (or (.> data (.> arg :name)) 0)))))
-
-      (arg/add-argument! spec '("--include" "-i")
-        :help    "Add an additional argument to the include path."
-        :cat     "path"
-        :many    true
-        :narg    1
-        :default '()
-        :action  arg/add-action)
-
-      (arg/add-argument! spec '("--prelude" "-P")
-        :help    "A custom prelude path to use."
-        :cat     "path"
-        :narg    1
-        :default (.. directory lib-name "/prelude"))
-
-      (arg/add-argument! spec '("--include-rocks" "-R")
-        :help    "Include all installed LuaRocks on the search path."
-        :cat     "path")
-
-      (arg/add-argument! spec '("--output" "--out" "-o")
-        :help    "The destination to output to."
-        :cat     "Output"
-        :narg    1
-        :default tmp-path
-        :action (lambda (arg data value)
-                  (.<! data (.> arg :name) (string/gsub value "%.lua$" ""))))
-
-      (arg/add-argument! spec '("--wrapper" "-w")
-        :help    "A wrapper script to launch Urn with"
-        :narg    1
-        :action  (lambda (a b value)
-                   (let* [(args (map id *arguments*))
-                          (i 1)
-                          (len (n args))]
-                     (while (<= i len)
-                       (with (item (nth args i))
-                         (cond
-                           [(or (= item "--wrapper") (= item "-w"))
-                            (remove-nth! args i)
-                            (remove-nth! args i)
-                            (set! i (succ len))]
-                           [(string/find item "^%-%-wrapper=.*$")
-                            (remove-nth! args i)
-                            (set! i (succ len))]
-                           [(string/find item "^%-[^-]+w$")
-                            (.<! args i (string/sub item 1 -2))
-                            (remove-nth! args (succ i))
-                            (set! i (succ len))]
-                           [true])))
-
-                     (with (command (list value))
-                       (when-with (interp (.> *arguments* -1)) (push! command interp))
-                       (push! command (.> *arguments* 0))
-
-                       (case (list (os/execute (concat (append command args) " ")))
-                         [((number? @ ?code) . _) (os/exit code)] ; luajit.
-                         [(_ _ ?code) (os/exit code)])))))
-
-      (arg/add-argument! spec '("--plugin")
-        :help    "Specify a compiler plugin to load."
-        :var     "FILE"
-        :default '()
-        :narg    1
-        :many    true
-        :action  arg/add-action)
-
-      (arg/add-argument! spec '("--flag" "-f")
-        :help    "Turn on a compiler flag, enabling or disabling a specific feature."
-        :default '()
-        :narg    1
-        :many    true
-        :action  arg/add-action)
-
-      (arg/add-argument! spec '("input")
-        :help    "The file(s) to load."
-        :var     "FILE"
-        :narg    "*"
-        :default (list tmp-path))
 
       ;; Setup the arguments for each task
       (for-each task tasks ((.> task :setup) spec))
 
-      (let* [(args (arg/parse! spec))
+      (let* [(args {
+               :optimise-n 10
+               :include '()
+               :explain false
+               :flag '()
+               :optimise 1
+               :include-rocks false
+               :gen-native false
+               :warning 1
+               :optimise-time -1
+               :shebang false
+               :input (list tmp-path)
+               :emit-lua true
+               :wrapper false
+               :time 0
+               :prelude (.. directory lib-name "/prelude.lisp")
+               :verbose 0
+               :chmod false
+               :output tmp-path
+               :plugin (list (.. directory "plugins/fold-defgeneric.lisp"))
+
+             })
              (logger (term/create
                        (.> args :verbose)
                        (.> args :explain)
@@ -288,9 +209,11 @@
       func)))
 
 (defun eval (code lib-path)
-  (eval-function code lib-path))
+  (case (type code)
+    ["string" (eval-string code lib-path)]
+    ["list" (eval-string (pretty code) lib-path)]))
 
 ((eval
-   "(for i 1 100 1
-      (print! i))"
+   '(for i 1 100 1
+      (print! i))
    "/home/casper/Projects/urn"))

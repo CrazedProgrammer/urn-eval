@@ -45,7 +45,7 @@
 
   path)
 
-(defun eval-string (code lib-dir)
+(defun eval-string (code lib-dir) :hidden
   (with (tmp-path (os/tmpname))
     (io/write-all! (.. tmp-path ".lisp") code)
     (let* [(spec (arg/create "The compiler and REPL for the Urn programming language."))
@@ -208,12 +208,22 @@
       (os/remove (.. tmp-path ".lua"))
       func)))
 
-(defun eval (code lib-path)
+(defun function-string (code) :hidden
   (case (type code)
-    ["string" (eval-string code lib-path)]
-    ["list" (eval-string (pretty code) lib-path)]))
+    ["string" code]
+    ["list" (pretty code)]
+    [true (error! (.. "Cannot eval type " (type code)))]))
 
-((eval
-   '(for i 1 100 1
-      (print! i))
-   "/home/casper/Projects/urn"))
+(defun eval-raw (code lib-path)
+  (eval-string (function-string code) lib-path))
+
+(defun eval (code lib-path)
+  (let* [(code-str (function-string code))
+         (function-name (.. code-str lib-path))]
+    (when (not (.> function-cache function-name))
+      (.<! function-cache function-name (eval-raw code lib-path)))
+    (.> function-cache function-name)))
+
+(defun clear-cache! ()
+  (for-each key (keys function-cache)
+    (.<! function-cache key nil)))
